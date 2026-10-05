@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>多人3D枪战</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #111;
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      user-select: none; -webkit-user-select: none;
+      /* 注意：不要在这里全局禁用 touch-action，否则手机菜单的按钮/输入框会失灵。
+         改为只对"游戏操作区"禁用（见下方 #camera-area / 摇杆 / 按钮） */
+      -webkit-tap-highlight-color: transparent;
+    }
+    canvas { position: fixed; top: 0; left: 0; z-index: 0; display: block; }
+
+    /* ---------- 菜单 ---------- */
+    #menu {
+      position: fixed; inset: 0; z-index: 30;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #14142b, #1f2340);
+      color: #eef; text-align: center; padding: 20px;
+      overflow-y: auto;
+    }
+    #menu h1 { font-size: 28px; margin-bottom: 6px; letter-spacing: 2px; }
+    #menu .sub { color: #9aa; margin-bottom: 22px; font-size: 14px; }
+    #menu button {
+      font-size: 18px; padding: 14px 40px; border: none; border-radius: 30px;
+      background: #3aa0ff; color: #fff; cursor: pointer; margin: 6px;
+      width: 240px;
+    }
+    #menu button:active { transform: scale(0.96); }
+    #btn-join { background: #34b36f; }
+    .input {
+      font-size: 18px; padding: 10px; border-radius: 12px; border: 2px solid #3aa0ff;
+      background: #fff; color: #222;
+      /* 手机输入需要：允许点击聚焦、允许输入文字 */
+      touch-action: auto;
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    #name-input { width: 240px; text-align: center; margin: 4px 0 10px; }
+    #custom-room, #room-input {
+      width: 150px; text-align: center; letter-spacing: 4px; text-transform: uppercase;
+    }
+    .join-row { display: flex; gap: 8px; margin: 6px 0; align-items: center; }
+    .join-row button { width: auto; padding: 12px 20px; }
+    #qr-box { margin-top: 20px; }
+    #qr-box p { color: #9aa; font-size: 13px; margin-bottom: 8px; }
+    #qrcode { background: #fff; padding: 8px; border-radius: 10px; display: inline-block; }
+    #menu-msg { color: #ffb56b; min-height: 22px; margin-top: 12px; font-size: 15px; }
+
+    /* ---------- 大厅（准备/开始） ---------- */
+    #lobby {
+      position: fixed; inset: 0; z-index: 28; display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #14142b, #1f2340);
+      color: #eef; text-align: center; padding: 20px;
+      overflow-y: auto;
+    }
+    #lobby h2 { font-size: 24px; margin-bottom: 4px; }
+    #lobby .room-code {
+      font-size: 42px; letter-spacing: 10px; font-weight: bold; color: #ffd23f;
+      margin: 8px 0 18px;
+    }
+    #lobby .tip { color: #9aa; font-size: 13px; margin-bottom: 12px; }
+    #player-list { width: 260px; margin-bottom: 18px; }
+    .player-item {
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(255,255,255,0.08); border-radius: 12px;
+      padding: 12px 16px; margin: 8px 0; font-size: 17px;
+    }
+    .player-item .pname { display: flex; align-items: center; gap: 6px; }
+    .badge { font-size: 12px; background: #ffd23f; color: #222; padding: 2px 7px; border-radius: 8px; }
+    .ready { color: #4ade80; font-size: 14px; }
+    .notready { color: #f87171; font-size: 14px; }
+    #lobby button {
+      font-size: 18px; padding: 13px 0; border: none; border-radius: 30px;
+      color: #fff; cursor: pointer; width: 240px; margin: 5px 0;
+    }
+    #btn-ready { background: #3aa0ff; }
+    #btn-start { background: #34b36f; }
+    #btn-start:disabled { background: #3a4a5a; color: #8899aa; cursor: not-allowed; }
+    #btn-leave { background: transparent; border: 2px solid #e04b3a !important; color: #e04b3a; }
+    #lobby-msg { color: #ffb56b; min-height: 20px; margin-top: 8px; font-size: 14px; }
+
+    /* ---------- 组队选择 ---------- */
+    .team-panel { margin: 2px 0 14px; }
+    .team-label { color: #9aa; font-size: 14px; margin-bottom: 8px; }
+    .team-buttons { display: flex; gap: 10px; justify-content: center; }
+    #lobby .team-btn {
+      font-size: 15px; padding: 10px 20px; width: auto; margin: 0;
+      border: 2px solid rgba(255,255,255,0.25); border-radius: 24px;
+      cursor: pointer; color: #fff; background: rgba(255,255,255,0.08);
+    }
+    #lobby .team-btn.red { border-color: #e04b3a; }
+    #lobby .team-btn.blue { border-color: #3a7be0; }
+    #lobby .team-btn.ffa { border-color: #cfd3da; }
+    #lobby .team-btn.active { box-shadow: 0 0 0 3px rgba(255,255,255,0.35); }
+    #lobby .team-btn.red.active { background: #e04b3a; border-color: #e04b3a; }
+    #lobby .team-btn.blue.active { background: #3a7be0; border-color: #3a7be0; }
+    #lobby .team-btn.ffa.active { background: #8a93a3; border-color: #cfd3da; }
+    .team-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin: 0 4px; vertical-align: middle; }
+
+    /* ---------- HUD ---------- */
+    #hud {
+      position: fixed; top: 10px; left: 0; width: 100%; z-index: 5;
+      display: flex; justify-content: space-between; align-items: flex-start;
+      padding: 0 14px; pointer-events: none; color: #fff;
+    }
+    #hud .tag {
+      background: rgba(0,0,0,0.5); padding: 5px 12px; border-radius: 16px;
+      font-size: 13px; margin-bottom: 6px; display: inline-block;
+    }
+    .hud-left, .hud-right { display: flex; flex-direction: column; align-items: flex-start; }
+    .hud-right { align-items: flex-end; }
+    .hp-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+    .hp-name { font-size: 13px; min-width: 30px; white-space: nowrap; }
+    .hp-bar {
+      width: 140px; height: 12px; background: rgba(0,0,0,0.5);
+      border-radius: 8px; overflow: hidden;
+    }
+    .hp-bar > div { height: 100%; width: 100%; border-radius: 8px; transition: width 0.15s; }
+
+    /* ---------- 准星（屏幕中心十字） ---------- */
+    #crosshair {
+      position: fixed; left: 50%; top: 50%; width: 4px; height: 4px;
+      transform: translate(-50%, -50%); z-index: 6; pointer-events: none;
+      background: #fff; border-radius: 50%;
+      box-shadow:
+        0 -9px 0 0 #fff,
+        0  9px 0 0 #fff,
+       -9px 0 0 0 #fff,
+        9px 0 0 0 #fff,
+        0 0 6px 2px rgba(0,0,0,0.8);
+    }
+    /* 冲锋枪抵肩瞄准：准星收缩成细小瞄准点 */
+    #crosshair.small {
+      background: #fff;
+      box-shadow: 0 0 4px 1px rgba(0,0,0,0.8);
+    }
+
+    /* ---------- 触屏控件 ---------- */
+    #camera-area { position: fixed; inset: 0; z-index: 1; touch-action: none; }
+    #joystick-base {
+      display: none;
+      position: fixed; left: 30px; bottom: 36px; z-index: 10;
+      width: 120px; height: 120px; border-radius: 50%;
+      background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.4);
+      touch-action: none;
+    }
+    #joystick-knob {
+      position: absolute; left: 50%; top: 50%; width: 56px; height: 56px;
+      border-radius: 50%; background: rgba(255,255,255,0.75);
+      transform: translate(-50%, -50%);
+    }
+    #touch-hint {
+      display: none;
+      position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+      z-index: 5; color: rgba(255,255,255,0.7); font-size: 12px; pointer-events: none;
+    }
+    .ctrl-btn {
+      display: none;
+      position: fixed; z-index: 10;
+      border: 2px solid rgba(255,255,255,0.5);
+      border-radius: 50%; color: #fff;
+      background: rgba(0,0,0,0.35);
+      align-items: center; justify-content: center;
+      font-size: 20px;
+      touch-action: none;
+    }
+    .ctrl-btn:active { background: rgba(255,255,255,0.3); }
+    #btn-fire {
+      width: 92px; height: 92px; right: 22px; bottom: 34px;
+      background: rgba(230,60,60,0.55); font-size: 26px;
+    }
+    #btn-jump { width: 66px; height: 66px; right: 128px; bottom: 60px; font-size: 22px; }
+    #btn-switch { width: 62px; height: 62px; right: 26px; bottom: 140px; font-size: 13px; }
+    #btn-reload { width: 62px; height: 62px; right: 100px; bottom: 140px; font-size: 24px; }
+    #btn-ads { width: 62px; height: 62px; right: 26px; bottom: 215px; font-size: 22px; }
+
+    body.touch #joystick-base, body.touch #touch-hint,
+    body.touch .ctrl-btn { display: flex; }
+
+    /* ---------- 命中提示 ---------- */
+    #hit-indicator {
+      position: fixed; top: 42%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 6; color: #ffd23f; font-size: 26px; font-weight: bold;
+      pointer-events: none; opacity: 0; transition: opacity 0.15s;
+      text-shadow: 0 0 8px rgba(0,0,0,0.7);
+    }
+
+    /* ---------- 结算界面 ---------- */
+    #result-overlay {
+      position: fixed; inset: 0; z-index: 25; display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6); color: #fff;
+    }
+    #result-text { font-size: 48px; font-weight: bold; margin-bottom: 10px; }
+    #result-overlay .sub { color: #ccc; font-size: 16px; }
+
+    /* ---------- 生命条数（❤） ---------- */
+    .lives { font-size: 12px; color: #ff6b81; white-space: nowrap; }
+
+    /* ---------- 开镜遮罩 ---------- */
+    #scope-overlay {
+      position: fixed; inset: 0; z-index: 4; pointer-events: none; display: none;
+    }
+    #scope-overlay.reddot {
+      background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+    }
+    #scope-overlay.dot {
+      background: radial-gradient(ellipse at center, transparent 72%, rgba(0,0,0,0.4) 100%);
+    }
+    #scope-overlay.high {
+      background: radial-gradient(circle at center, transparent 0 30%, rgba(0,0,0,0.98) 30.5% 100%);
+    }
+    #scope-overlay.high::before, #scope-overlay.high::after {
+      content: ''; position: absolute; left: 50%; top: 50%; background: rgba(0,0,0,0.95);
+      transform: translate(-50%, -50%);
+    }
+    #scope-overlay.high::before { width: 100%; height: 2px; }
+    #scope-overlay.high::after { width: 2px; height: 100%; }
+
+    /* ---------- 弹出提示（房间已满等） ---------- */
+    #toast {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 50; background: rgba(0,0,0,0.85); color: #fff;
+      padding: 16px 28px; border-radius: 14px; font-size: 18px;
+      pointer-events: none; opacity: 0; transition: opacity 0.2s;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <!-- 菜单界面 -->
+  <div id="menu">
+    <h1>🔫 多人3D枪战</h1>
+    <div class="sub">阶段5 · 4人对战 + 双命制 + 开镜 + 大地图</div>
+    <input id="name-input" class="input" placeholder="你的昵称" maxlength="8" autocomplete="off" value="玩家">
+    <button id="btn-create">创建房间</button>
+    <div class="join-row">
+      <input id="custom-room" class="input" placeholder="自定义房间号(可选)" maxlength="4" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="join-row">
+      <input id="room-input" class="input" placeholder="房间号" maxlength="4" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
+      <button id="btn-join">加入房间</button>
+    </div>
+    <div id="qr-box">
+      <p>📱 手机扫码打开本页（和电脑连同一网络 / 同一网址）</p>
+      <div id="qrcode"></div>
+    </div>
+    <div id="menu-msg"></div>
+  </div>
+
+  <!-- 大厅界面（准备 / 开始） -->
+  <div id="lobby">
+    <h2>房间号</h2>
+    <div class="room-code" id="lobby-room">----</div>
+    <div class="tip" id="lobby-count">当前人数：0 / 4</div>
+    <div id="player-list"></div>
+    <div class="team-panel">
+      <div class="team-label">选择队伍：</div>
+      <div class="team-buttons">
+        <button id="team-red" class="team-btn red">红队</button>
+        <button id="team-blue" class="team-btn blue">蓝队</button>
+        <button id="team-ffa" class="team-btn ffa active">自由混战</button>
+      </div>
+    </div>
+    <button id="btn-ready">准备</button>
+    <button id="btn-start" disabled>开始游戏</button>
+    <button id="btn-leave">退出房间</button>
+    <div id="lobby-msg"></div>
+  </div>
+
+  <!-- 游戏界面 -->
+  <div id="game" style="display:none">
+    <div id="camera-area"></div>
+
+    <!-- 顶部信息栏 -->
+    <div id="hud">
+      <div class="hud-left">
+        <span class="tag" id="room-label">房间号：--</span>
+        <div class="hp-row">
+          <span class="hp-name">我</span>
+          <div class="hp-bar"><div id="hp-my"></div></div>
+        </div>
+        <span class="tag" id="lives-label">生命：❤❤</span>
+        <span class="tag" id="weapon-label">武器：冲锋枪</span>
+        <span class="tag" id="ammo-label">30 / 30 | 备弹 120</span>
+      </div>
+      <div class="hud-right">
+        <div id="enemy-hp-container"></div>
+        <span class="tag" id="player-count">人数：1 / 4</span>
+      </div>
+    </div>
+
+    <!-- 触屏控件 -->
+    <div id="joystick-base"><div id="joystick-knob"></div></div>
+    <button id="btn-switch" class="ctrl-btn">冲锋枪</button>
+    <button id="btn-reload" class="ctrl-btn">↻</button>
+    <button id="btn-jump" class="ctrl-btn">⬆</button>
+    <button id="btn-ads" class="ctrl-btn">🎯</button>
+    <button id="btn-fire" class="ctrl-btn">🔫</button>
+    <div id="touch-hint">左摇杆移动 · 右半屏转视角 · 右下按钮射击/跳/换枪/换弹/开镜</div>
+
+    <!-- 准星 -->
+    <div id="crosshair"></div>
+
+    <!-- 开镜遮罩（红点 / 高倍镜） -->
+    <div id="scope-overlay"></div>
+
+    <!-- 命中提示 -->
+    <div id="hit-indicator"></div>
+
+    <!-- 结算 -->
+    <div id="result-overlay">
+      <div id="result-text"></div>
+      <div class="sub">即将返回房间…</div>
+    </div>
+  </div>
+
+  <!-- 弹出提示（房间已满等） -->
+  <div id="toast"></div>
+
+  <!-- 依赖 -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+  <script type="module" src="client.js"></script>
+</body>
+</html>
